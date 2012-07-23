@@ -1,0 +1,13 @@
+Source: sigtr
+Section: perl
+Priority: optional
+Build-Depends: debhelper (>= 7)
+Build-Depends-Indep: perl
+Maintainer: Tom Jones <tom@oxix.org>
+Standards-Version: 3.9.1
+Homepage: http://github.com/tomgjones/sigtr/
+
+Package: sigtr
+Architecture: all
+Depends: ${misc:Depends}, ${perl:Depends}, liblinux-prctl-perl
+Description: translate signals for a child process
