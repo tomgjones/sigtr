@@ -1,0 +1,271 @@
+#!/usr/bin/perl
+
+use strict;
+
+use Getopt::Long qw(:config bundling no_ignore_case require_order);;
+use Pod::Usage;
+use POSIX qw( WIFSIGNALED WIFEXITED WEXITSTATUS WTERMSIG );
+
+my ($opt_silent);
+GetOptions('s|silent' => \$opt_silent)
+    or pod2usage(-exitval => 64, -verbose => 0);
+
+my @trs;
+my @to_run;
+
+my $done_trs = 0;
+for (@ARGV) {
+    if ($done_trs) {
+        push @to_run, $_;
+    }
+    else {
+        if (is_tr_form($_)) {
+            push @trs, $_;
+        }
+        elsif ($_ eq '--') {
+            # drop - it's acting as a separator
+            $done_trs = 1;
+        }
+        else {
+            push @to_run, $_;
+            $done_trs = 1;
+        }
+    }
+}
+
+if (!@to_run) {
+    pod2usage(-message => 'PROG not given', -exitval => 64, -verbose => 0);
+}
+
+my $can_set_pdeathsig = 0;
+
+if ($^O eq "linux") {
+    my $rv = eval {
+        require Linux::Prctl; Linux::Prctl->import('set_pdeathsig');
+        1;
+    };
+    if ($rv) {
+        $can_set_pdeathsig = 1;
+    }
+    else {
+        warn "warning: KILL signals can not be propogated; please install "
+            . "Linux::Prctl to enable.\n";
+    }
+}
+else {
+    warn "warning: KILL signals can not be propogated; no prctl(2) or similar\n"
+        . "  known about for your platform\n";
+}
+
+my %trs;
+for my $rule (@trs) {
+    assert_is_valid_tr($rule);
+    if ($rule =~ /(\w+):(\w+)?/) {
+        my ($from, $to) = map { sig_canon($_) } ($1, $2);
+        if (exists($trs{$from})) {
+            warn "more than one rule defined from $from\n";
+            exit 1;
+        }
+        $trs{$from} = $to;
+    }
+    else {
+        die "internal error: wasn't expecting that";
+    }
+}
+
+# Set up pass-through for most signals.
+for my $sig (keys %SIG) {
+    if (!exists($trs{$sig})) {
+        if (is_catchable($sig) and is_real($sig)) {
+            $trs{$sig} = $sig;
+        }
+    }
+}
+
+if (my $chpid = fork) {
+    for my $sig (sort keys %trs) {
+        if ($trs{$sig} eq '') {
+            $SIG{$sig} = 'IGNORE';
+        }
+
+        $SIG{$sig} = sub {
+            if (! kill($trs{$sig}, $chpid)) {
+                # This is probably our own child - we remove the handler
+                # for CHLD straight after wait() returns, but there would
+                # always be a race.
+                unless($sig eq 'CHLD') {
+                    warn "failed to signal $chpid with $sig\n";
+                }
+            }
+        };
+    }
+
+    wait;
+    $SIG{CHLD} = 'DEFAULT';
+
+    if (WIFEXITED( $? )) {
+        exit(WEXITSTATUS( $? ));
+    }
+    elsif (WIFSIGNALED( $? )) {
+        # To be as transparent as possible to our parent process, we
+        # kill ourself with the same signal, rather than simply exiting.  
+        # We have to remove our own signal handlers first, though.
+        for (keys %SIG) {
+            $SIG{$_} = 'DEFAULT';
+        }
+        kill WTERMSIG( $? ), $$;
+    }
+}
+else {
+    # This is a bit of an assumption - the parent may exit before us for
+    # reasons other than a KILL signal, such as an implementation bug.  But
+    # usually it will be due to a KILL signal, so this simulates propogating
+    # it.  Note that the exec'd process may call prctl(PR_SET_PDEATHSIG...)
+    # itself to change it - if the child really wants to "escape" we can't
+    # stop it.
+    $can_set_pdeathsig and set_pdeathsig(9);
+
+    exec { $to_run[0] } @to_run;
+    die "exec: $!: $to_run[0]\n";
+}
+
+## Subs
+
+# Returns true if the string has the form of a translation rule, false
+# otherwise.  We want to match things that look like rules but contain invalid
+# signal names,
+# so that we can be more helpful to the user.
+sub is_tr_form {
+    my ($str) = @_;
+
+    if ($str =~ /^\w+:(\w+)?$/) {
+        return 1;
+    }
+    return;
+}
+
+sub assert_is_valid_tr {
+    my ($str) = @_;
+
+    if ($str !~ /(\w+):(\w+)?/) {
+        warn "bad rule: $str\n";
+        exit 1;
+    }
+    my ($from, $to) = map { sig_canon($_) } ($1, $2);
+    if (!is_catchable($from)) {
+        warn "uncatchable: $from\n";
+        exit 1;
+    }
+    if (!is_real($from)) {
+            warn "not a signal: $_\n";
+            exit 1;
+    }
+    if ($to ne '' and !is_real($to)) {
+        warn "not a signal: $_\n";
+        exit 1;
+    } 
+}
+
+sub is_catchable {
+    my ($str) = @_;
+
+    my $name = sig_canon($str);
+    if ($name eq 'KILL' or $name eq 'STOP') {
+        return;
+    }
+    return 1;
+}
+
+sub is_real {
+    my ($str) = @_;
+
+    my $name = sig_canon($str);
+
+    return unless exists($SIG{$name});
+
+    if ((grep { $name eq $_ } qw(CLD IOT __WARN__ __DIE__))
+        or $name =~ /^NUM/ ) {
+
+        return;
+    }
+    return 1;
+}
+
+
+
+sub sig_canon {
+    my ($sig) = @_;
+
+    $sig =~ s/^SIG//;
+    return $sig;
+}
+
+__END__
+
+Proposed changes to interface
+ - specify signals by number
+
+Note POSIX says
+
+If and when the function returns, if the value of sig was SIGFPE, SIGILL, or SIGSEGV or any other implementation-defined value corresponding to a computational exception, the behavior is undefined.  So should we not catch those, too?
+
+=head1 NAME
+
+sigtr - translate signals for a child process
+
+SYNOPSIS
+
+  sigtr [OPTIONS] [INSIG:OUTSIG ...] [--] PROG [ARGS ...]
+
+  OPTIONS
+  -s,--silent          Don't issue warnings.
+
+=head1 DESCRIPTION
+
+sigtr runs PROG as a child process with arguments ARGS. Signals are
+caught (where catchable), translated according to the
+INSIG:OUTSIG rules, and propogated to the child.
+
+Signal names may be either symbolic (with or without the "SIG"
+prefix), or numeric. If no signal is given on the right hand
+side of a translation rule, sigtr catches and drops the signal.
+
+It is an error to give an uncatchable signal (KILL, STOP)
+as an input signal,
+but they are allowed as output signals.
+
+Rules may not be chained, and it is an error to specify two rules
+with the same value for INSIG.
+
+If PROG contains a colon or starts with a dash, "--" must be used to
+separate the translation rule arguments from PROG. In other
+circumstances, it may be used, but is not required.
+
+sigtr exits with PROG's exit status. If PROG was terminated by
+an unhandled signal, sigtr will cause itself to be terminated by
+the same signal (ensuring it doesn't handle it). In this way,
+running programs under sigtr is fairly transparent to processes
+higher in the process tree.
+
+=head2 OPTIONS
+
+=over 4
+
+=item -s,--silent
+
+Don't issue warnings.
+
+=back
+
+=head1 EXAMPLES
+
+Swap TERM and INT for postgresql:
+
+  sigtr TERM:INT INT:TERM postgres
+
+Hang up your hangups:
+
+  sigtr SIGHUP: httpd
+
+=cut
+
