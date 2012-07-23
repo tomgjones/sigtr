@@ -225,14 +225,14 @@ sub sig_canon {
 
 sigtr - translate signals for a child process
 
-SYNOPSIS
+=head1 SYNOPSIS
 
   sigtr [OPTIONS] [INSIG:OUTSIG ...] [--] PROG [ARGS ...]
 
   OPTIONS
   -s,--silent          Don't issue warnings.
 
-
+=cut
 
 __END__
 
