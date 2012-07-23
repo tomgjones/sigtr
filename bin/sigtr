@@ -1,5 +1,26 @@
 #!/usr/bin/perl
 
+# Copyright (C) 2012 Tom Jones.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights 
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
+# copies of the Software, and to permit persons to whom the Software is 
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
 use strict;
 
 use Getopt::Long qw(:config bundling no_ignore_case require_order);;
@@ -200,15 +221,6 @@ sub sig_canon {
     return $sig;
 }
 
-__END__
-
-Proposed changes to interface
- - specify signals by number
-
-Note POSIX says
-
-If and when the function returns, if the value of sig was SIGFPE, SIGILL, or SIGSEGV or any other implementation-defined value corresponding to a computational exception, the behavior is undefined.  So should we not catch those, too?
-
 =head1 NAME
 
 sigtr - translate signals for a child process
@@ -220,52 +232,14 @@ SYNOPSIS
   OPTIONS
   -s,--silent          Don't issue warnings.
 
-=head1 DESCRIPTION
 
-sigtr runs PROG as a child process with arguments ARGS. Signals are
-caught (where catchable), translated according to the
-INSIG:OUTSIG rules, and propogated to the child.
 
-Signal names may be either symbolic (with or without the "SIG"
-prefix), or numeric. If no signal is given on the right hand
-side of a translation rule, sigtr catches and drops the signal.
+__END__
 
-It is an error to give an uncatchable signal (KILL, STOP)
-as an input signal,
-but they are allowed as output signals.
+Proposed changes to interface
+ - specify signals by number
 
-Rules may not be chained, and it is an error to specify two rules
-with the same value for INSIG.
+Note POSIX says
 
-If PROG contains a colon or starts with a dash, "--" must be used to
-separate the translation rule arguments from PROG. In other
-circumstances, it may be used, but is not required.
-
-sigtr exits with PROG's exit status. If PROG was terminated by
-an unhandled signal, sigtr will cause itself to be terminated by
-the same signal (ensuring it doesn't handle it). In this way,
-running programs under sigtr is fairly transparent to processes
-higher in the process tree.
-
-=head2 OPTIONS
-
-=over 4
-
-=item -s,--silent
-
-Don't issue warnings.
-
-=back
-
-=head1 EXAMPLES
-
-Swap TERM and INT for postgresql:
-
-  sigtr TERM:INT INT:TERM postgres
-
-Hang up your hangups:
-
-  sigtr SIGHUP: httpd
-
-=cut
+If and when the function returns, if the value of sig was SIGFPE, SIGILL, or SIGSEGV or any other implementation-defined value corresponding to a computational exception, the behavior is undefined.  So should we not catch those, too?
 
